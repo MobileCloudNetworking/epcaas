@@ -1,0 +1,12 @@
+bundle/doc/
+build/
+dist/
+sdist/
+.coverage
+.idea/
+*.pyc
+*.egg-info
+*.xml
+*.log
+*.zip
+*.png

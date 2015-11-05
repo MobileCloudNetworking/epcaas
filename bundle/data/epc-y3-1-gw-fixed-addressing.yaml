@@ -1,0 +1,307 @@
+heat_template_version: 2013-05-23
+#heat_template_version: 2014-10-16
+
+description: >
+  OpenEPC template for Y3 - NO NETWORK CREATION
+
+parameters:
+  key_name:
+    type: string
+    description: Name of keypair to assign to servers
+    default: mcn-tub
+  image:
+    type: string
+    description: Name of image to use for servers
+    default: "epc-base-r206"
+  flavor:
+    type: string
+    description: Flavor to use for servers
+    default: m1.small
+  # public_net:
+    # type: string
+    # description: >
+      # ID or name of public network for which floating IP addresses will be allocated
+    # default: external
+
+  public_net_id:
+    type: string
+    description: >
+      ID or name of public network for which floating IP addresses will be allocated
+    default: fde9f17b-eb51-4d4b-a474-deb583d03d86
+  private_net_a_id:
+    type: string
+    description: >
+      ID of private network net_a
+    default: d291a440-fd7d-4025-b676-2ac8f132005b
+  # private_net_b_id:
+    # type: string
+    # description: >
+      # ID of private network net_b
+    # default: 6696be21-9bb8-4398-ac66-2766239f557c
+  # private_net_c_id:
+    # type: string
+    # description: >
+      # ID of private network net_c
+    # default: b7cefba5-9035-4179-b146-69f9159a0c1c
+  private_net_d_id:
+    type: string
+    description: >
+      ID of private network net_d
+    default: e780d5d6-78a9-46dc-8a3f-ed588379afa2
+  private_mgmt_net_id:
+    type: string
+    description: >
+      ID of private network mgmt
+    default: 367d1aba-c539-46e1-8047-65c28283d9c9
+
+  dnsaas_ip_address:
+    type: string
+    description: IP address of Zabbix Server
+    default: 192.168.85.164
+  cidr_mgmt:
+    type: string
+    description: CIDR of mgmt network
+    default: "192.168.85.0/24"
+  gw_mgmt:
+    type: string
+    description: IP of GW of mgmt network
+    default: "192.168.85.1"
+  mgmt_prefix:
+    type: string
+    default: "192.168.85"
+
+resources:
+
+  pgwu-sgwu-1:
+    type: OS::Nova::Server
+    properties:
+      name: pgwu-sgwu-1
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_resource: pgwu-sgwu-1_port_mgmt }
+        - port: { get_resource: pgwu-sgwu-1_port_a }
+        - port: { get_resource: pgwu-sgwu-1_port_d }
+      user_data: 
+        str_replace:
+          template: |
+            #!/usr/bin/env bash
+            /opt/adapterScripts/common/configure_interfaces.sh 3
+            ip route del 0/0
+            route add -net %cidr_mgmt% gw %gw_mgmt%
+            route add default gw %gw_mgmt%
+
+            # cat << EOF > /etc/resolv.conf
+            # search epc.mnc001.mcc001.3gppnetwork.org
+            # domain epc.mnc001.mcc001.3gppnetwork.org
+            # nameserver %dnsaas_ip%
+            # EOF
+          params:
+            "%dnsaas_ip%": { get_param: dnsaas_ip_address}
+            "%cidr_mgmt%": { get_param: cidr_mgmt}
+            "%gw_mgmt%": { get_param: gw_mgmt}
+      user_data_format: RAW
+
+  pgwu-sgwu-1_port_d:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_net_d_id }
+      fixed_ips:
+        - ip_address: "172.19.8.45"  
+  pgwu-sgwu-1_port_mgmt:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_mgmt_net_id }
+      fixed_ips:
+        #- ip_address: "192.168.85.45"
+        - ip_address: { list_join: ['.', [{get_param: mgmt_prefix}, '45']] }
+  pgwu-sgwu-1_port_a:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_net_a_id }
+      fixed_ips:
+        - ip_address: "172.19.5.45"
+
+  pgwu-sgwu-1_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: public_net_id }
+      port_id: { get_resource: pgwu-sgwu-1_port_d }
+
+  nat:
+    type: OS::Nova::Server
+    properties:
+      name: nat
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_resource: nat_port_mgmt }
+        - port: { get_resource: nat_port_a }
+      user_data: 
+        str_replace:
+          template: |
+            #!/usr/bin/env bash
+            /opt/adapterScripts/common/configure_interfaces.sh 2
+            ip route del 0/0
+            route add -net %cidr_mgmt% gw %gw_mgmt%
+            route add default gw %gw_mgmt%
+
+            # cat << EOF > /etc/resolv.conf
+            # search epc.mnc001.mcc001.3gppnetwork.org
+            # domain epc.mnc001.mcc001.3gppnetwork.org
+            # nameserver %dnsaas_ip%
+            # EOF
+          params:
+            "%dnsaas_ip%": { get_param: dnsaas_ip_address}
+            "%cidr_mgmt%": { get_param: cidr_mgmt}
+            "%gw_mgmt%": { get_param: gw_mgmt}
+      user_data_format: RAW
+
+  nat_port_mgmt:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_mgmt_net_id }
+      fixed_ips:
+        #- ip_address: "192.168.85.46"
+        - ip_address: { list_join: ['.', [{get_param: mgmt_prefix}, '46']] }
+  nat_port_a:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_net_a_id }
+      fixed_ips:
+        - ip_address: "172.19.5.46"
+
+  # nat_floating_ip:
+    # type: OS::Neutron::FloatingIP
+    # properties:
+      # floating_network_id: { get_param: public_net_id }
+      # port_id: { get_resource: nat_port_mgmt }
+
+  mme-pgwc-sgwc:
+    type: OS::Nova::Server
+    properties:
+      name: mme-pgwc-sgwc
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_resource: mme-pgwc-sgwc_port_mgmt }
+        - port: { get_resource: mme-pgwc-sgwc_port_d }
+      user_data: 
+        str_replace:
+          template: |
+            #!/usr/bin/env bash
+            /opt/adapterScripts/common/configure_interfaces.sh 2
+            ip route del 0/0
+            route add -net %cidr_mgmt% gw %gw_mgmt%
+            route add default gw %gw_mgmt%
+
+            # cat << EOF > /etc/resolv.conf
+            # search epc.mnc001.mcc001.3gppnetwork.org
+            # domain epc.mnc001.mcc001.3gppnetwork.org
+            # nameserver %dnsaas_ip%
+            # EOF
+          params:
+            "%dnsaas_ip%": { get_param: dnsaas_ip_address}
+            "%cidr_mgmt%": { get_param: cidr_mgmt}
+            "%gw_mgmt%": { get_param: gw_mgmt}
+      user_data_format: RAW
+
+  mme-pgwc-sgwc_port_d:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_net_d_id }
+      fixed_ips:
+        - ip_address: "172.19.8.47"  
+  mme-pgwc-sgwc_port_mgmt:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_mgmt_net_id }
+      fixed_ips:
+        #- ip_address: "192.168.85.47"
+        - ip_address: { list_join: ['.', [{get_param: mgmt_prefix}, '47']] }
+
+  mme-pgwc-sgwc_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: public_net_id }
+      port_id: { get_resource: mme-pgwc-sgwc_port_d }
+
+  # dns:
+    # type: OS::Nova::Server
+    # properties:
+      # name: dns
+      # key_name: { get_param: key_name }
+      # image: { get_param: image }
+      # flavor: { get_param: flavor }
+      # networks:
+        # - port: { get_resource: dns_port_mgmt }
+        # - port: { get_resource: dns_port_a }
+      # # user_data:
+        # # str_replace:
+          # # template: |
+            # # !/usr/bin/env bash
+
+            # # apt-get install -y zabbix-agent
+            # # sed -i 's/127.0.0.1/%maas_ip%/g' /etc/zabbix/zabbix_agentd.conf
+            # # sed -i 's/Hostname=/#Hostname=/g' /etc/zabbix/zabbix_agentd.conf
+            # # service zabbix-agent restart
+
+          # # params:
+            # # "%zabbix_ip%": { get_attr: [zs_floating_ip, floating_ip_address] }
+            # # "%maas_ip%": { get_param: maas_ip_address }
+      # user_data_format: RAW
+
+  # dns_port_mgmt:
+    # type: OS::Neutron::Port
+    # properties:
+      # network_id: { get_param: private_mgmt_net_id }
+      # fixed_ips:
+        # - ip_address: "192.168.85.49"  
+  # dns_port_a:
+    # type: OS::Neutron::Port
+    # properties:
+      # network_id: { get_param: private_net_a_id }
+      # fixed_ips:
+        # - ip_address: "172.19.5.49"  
+
+outputs:
+  mcn.endpoint.pgwu-sgwu-1:
+    description: mgmt IP address of sgw_u
+    # value: { get_attr: [ pgwu-sgwu-1, first_address ] }
+    value: {get_attr: [pgwu-sgwu-1_port_mgmt, fixed_ips]}
+  mcn.endpoint.mme-pgwc-sgwc:
+    description: mgmt IP address of mme-pgw_c-sgw_c
+    value: { get_attr: [ mme-pgwc-sgwc_port_mgmt, fixed_ips] }
+  mcn.endpoint.nat:
+    description: mgmt IP address of nat
+    value: { get_attr: [ nat_port_mgmt, fixed_ips] }
+  # mcn.endpoint.dns:
+    # description: mgmt IP address of dns
+    # value: { get_attr: [ dns, first_address ] }
+  mcn.endpoint.dnsaas:
+    description: IP address of DNSaaS
+    value: { get_param: dnsaas_ip_address }
+  # mcn.endpoint.maas:
+    # value: { get_param: maas_ip_address }
+    # description: IP address of MaaS
+  # nat_public_ip:
+    # description: Floating IP address of nat in public network
+    # value: { get_attr: [ nat_floating_ip, floating_ip_address ] }
+  mme-pgwc-sgwc_public_ip:
+    description: Floating IP address of mme-pgwc-sgwc in public network
+    value: { get_attr: [ mme-pgwc-sgwc_floating_ip, floating_ip_address] }
+  pgwu-sgwu-1_public_ip:
+    description: Floating IP address of pgwu-sgwu in public network
+    value: { get_attr: [ pgwu-sgwu-1_floating_ip, floating_ip_address] }
+  pgwu-sgwu-1.net_a.ip:
+    value: {get_attr: [pgwu-sgwu-1_port_a, fixed_ips]}
+  pgwu-sgwu-1.net_d.ip:
+    value: {get_attr: [pgwu-sgwu-1_port_d, fixed_ips]}
+  mme-pgwc-sgwc.net_d.ip:
+    value: {get_attr: [mme-pgwc-sgwc_port_d, fixed_ips]}
+  nat.net_a.ip:
+    value: {get_attr: [nat_port_a, fixed_ips]}
+

@@ -1,0 +1,107 @@
+#!/usr/bin/python
+
+# Copyright (c) 2014, Telecom Italia SpA
+
+"""
+Service Orchestrator for OpenEPC.
+MCN 2014
+"""
+
+import os
+
+try:
+    VIRTENV = os.environ.get('OPENSHIFT_PYTHON_DIR', '.') + '/VIRTENV/'
+    VIRTUALENV = os.path.join(VIRTENV, 'bin/activate_this.py')
+    execfile(VIRTUALENV, dict(__file__=VIRTUALENV))
+except IOError:
+    pass
+#
+# IMPORTANT: Put any additional includes below this line.  If placed above this
+# line, it's possible required libraries won't be in your searchable path
+#
+
+import so
+from sdk.mcn import occi_ext
+from globals import DEFAULT_REGION
+
+
+class EPCSOBackend(occi_ext.Backend):
+    """
+    Creates an OCCI backend for EPC SO
+    """
+
+    def __init__(self):
+        self.so = None
+
+    def create(self, entity, extras):
+        if ('region_name' in entity.attributes) and \
+                (entity.attributes['region_name'] != ''):
+            region_name = entity.attributes['region_name']
+        else:
+            region_name = DEFAULT_REGION
+        print "EPCaaS -- REGION NAME: "
+        print region_name
+        
+        token = extras['token']
+        tenant_name = extras['tenant_name']
+        self.so = so.EPCSO(token, tenant_name, region_name)
+        self.so.so_e.design()
+        entity.actions = [occi_ext.DEPLOY_ACTION]
+
+    def retrieve(self, entity, extras):
+        if occi_ext.DEPLOY_ACTION in entity.actions:
+            entity.attributes['occi.mcn.stack.state'] = 'uninitialized'
+            entity.attributes['occi.mcn.stack.id'] = 'N/A'
+        else:
+            state, stack_id, stack_output = self.so.so_e.state()
+            entity.attributes['occi.mcn.stack.state'] = state
+            entity.attributes['occi.mcn.stack.id'] = stack_id
+            # print "-------------------- RETRIEVE ------------------ "
+            # print stack_output
+            for kv in stack_output:
+                if 'ip_address' in kv['output_value'][0]:
+                    entity.attributes[kv['output_key']] = \
+                        kv['output_value'][0]['ip_address']
+                else:
+                    entity.attributes[kv['output_key']] = kv['output_value']
+
+    def update(self, old, new, extras):
+        # TODO: attributes would need to be defined by a mixin.
+        # triggers the provisioning of the VMs
+        old.attributes.update(new.attributes)
+        self.so.so_e.update(old.attributes)
+
+    def delete(self, entity, extras):
+        self.so.so_e.dispose()
+
+    # Actions
+
+    def deploy_me(self, entity, attributes, extras):
+        self.so.so_e.deploy(attributes)
+        entity.actions = [occi_ext.PROVISION_ACTION]
+
+    def provision_me(self, entity, attributes, extras):
+        # SR 16/6/15: the provision phase is called by the SM immediately after
+        # deploy. For EPCaaS this step is actually useless, because
+        # parameters like MaaS and DNSaaS IP addresses are only
+        # available after a certain time. This means that only when the SM
+        # calls 'update' method for the first time, the real provision can
+        # actually happen. In fact, the 'update' logic checks
+        # if the entities are not provisioned yet and calls 'provision'.
+        # If they are provisioned, 'update' performs only an update
+
+        # self.so.so_e.provision(attributes)
+        entity.actions = []
+
+
+application = occi_ext.Application(EPCSOBackend())
+
+#
+# Below for testing only
+#
+if __name__ == '__main__':
+    print "SO application START"
+    from wsgiref.simple_server import make_server
+    HTTPD = make_server('0.0.0.0', 8080, application)
+    # Wait for a single request, serve it and quit.
+    HTTPD.serve_forever()

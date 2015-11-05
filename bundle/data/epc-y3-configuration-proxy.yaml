@@ -1,0 +1,112 @@
+heat_template_version: 2013-05-23
+
+description: >
+  OpenEPC template for Y3 - conf proxy - NO NETWORK CREATION
+
+parameters:
+  key_name:
+    type: string
+    description: Name of keypair to assign to servers
+    default: mcn-key
+  image:
+    type: string
+    description: Name of image to use for servers
+    default: "ubuntu-14.04.1"
+  flavor:
+    type: string
+    description: Flavor to use for servers
+    default: m1.small
+  private_mgmt_net_id:
+    type: string
+    description: >
+      ID of private network mgmt
+    default: 367d1aba-c539-46e1-8047-65c28283d9c9
+  public_net_id:
+    type: string
+    description: >
+      ID or name of public network for which floating IP addresses will be allocated
+    default: fde9f17b-eb51-4d4b-a474-deb583d03d86
+  cidr_mgmt:
+    type: string
+    description: >
+      CIDR of mgmt network, for squid
+    default: "192.168.85.0/24"
+  sec_group:
+    type: string
+    description: Name of security group for proxy
+    default: "epc-proxy-sg"
+
+resources:
+
+  epcaas-conf-proxy:
+    type: OS::Nova::Server
+    properties:
+      name: epcaas-conf-proxy
+      key_name: { get_param: key_name }
+      image: { get_param: image }
+      flavor: { get_param: flavor }
+      networks:
+        - port: { get_resource: epcaas-conf-proxy_port_mgmt }
+      user_data:
+        str_replace:
+          template: |
+            #!/usr/bin/env bash
+
+            apt-get update
+            apt-get install -y squid
+            cat <<EOF > /etc/squid3/squid.conf
+            acl localnet src %cidr_mgmt%        # RFC1918 possible internal network
+            acl mynet src 0.0.0.0/0.0.0.0
+            acl SSL_ports port 443
+            acl Safe_ports port 80          # http
+            acl Safe_ports port 21          # ftp
+            acl Safe_ports port 443         # https
+            acl Safe_ports port 70          # gopher
+            acl Safe_ports port 210         # wais
+            acl Safe_ports port 1025-65535  # unregistered ports
+            acl Safe_ports port 280         # http-mgmt
+            acl Safe_ports port 488         # gss-http
+            acl Safe_ports port 591         # filemaker
+            acl Safe_ports port 777         # multiling http
+            acl CONNECT method CONNECT
+            http_access deny !Safe_ports
+            http_access deny CONNECT !SSL_ports
+            http_access allow localhost manager
+            http_access deny manager
+            http_access allow mynet
+            http_access allow localnet
+            http_port 3128
+            access_log daemon:/var/log/squid3/access.log squid
+            coredump_dir /var/spool/squid3
+            refresh_pattern ^ftp:           1440    20%     10080
+            refresh_pattern ^gopher:        1440    0%      1440
+            refresh_pattern -i (/cgi-bin/|\?) 0     0%      0
+            refresh_pattern (Release|Packages(.gz)*)$      0       20%     2880
+            refresh_pattern .               0       20%     4320
+            cache_effective_user proxy
+            cache_effective_group proxy
+            EOF
+            service squid3 restart
+
+          params:
+            "%cidr_mgmt%": { get_param: cidr_mgmt}
+
+      user_data_format: RAW
+
+  epcaas-conf-proxy_port_mgmt:
+    type: OS::Neutron::Port
+    properties:
+      network_id: { get_param: private_mgmt_net_id }
+      security_groups: [{ get_param: sec_group }]
+
+  epcaas-conf-proxy_floating_ip:
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network_id: { get_param: public_net_id }
+      port_id: { get_resource: epcaas-conf-proxy_port_mgmt }
+
+outputs:
+  mcn.endpoint.epcaas-conf-proxy:
+    description: publiv IP address of epcaas-conf-proxy
+    #value: { get_attr: [ epcaas-conf-proxy, first_address ] }
+    value: { get_attr: [ epcaas-conf-proxy_floating_ip, floating_ip_address] }

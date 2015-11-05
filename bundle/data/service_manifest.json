@@ -1,0 +1,14 @@
+{
+    "service_type": "http://schemas.mobile-cloud-networking.eu/occi/sm#epc",
+    "service_description": "MCN EPCaaS service",
+    "service_attributes": {
+      "mcn.endpoint.mme-pgwc-sgwc": "immutable",
+      "mcn.endpoint.pgwu-sgwu-1": "immutable",
+      "mcn.endpoint.nat": "immutable",
+      "mcn.endpoint.maas": "",
+      "mcn.endpoint.api": "",
+      "region_name": ""
+    },
+    "service_endpoint": "http://epc.cloudcomplab.ch:8888/epc/",
+    "depends_on": []
+}
