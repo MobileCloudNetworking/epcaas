@@ -4,7 +4,7 @@ This is the implementation of a Service Orchestrator (SO) for the life-cycle man
 
 The SO adheres to MCN framework.
 
-The bundle/data folder contains the HEAT templates, used by the SO to create proper 
+The bundle/data folder contains the HEAT templates, used by the SO to create proper OpenEPC VMs.
 
 ### Dependencies
 
@@ -16,12 +16,12 @@ You will need to:
     $ cd mcn_sm
     $ python ./setup install
 
-## Configuration
+### Configuration
 See: `./etc/sm.cfg`
 
 Make sure to provide a valid RSA SSH key. DSS keys are not supported.
 
-## Running
+### Running
 Execute this on the SM container/VM:
 
     $ service_manager -c etc/sm.cfg
